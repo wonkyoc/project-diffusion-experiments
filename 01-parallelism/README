@@ -1,0 +1,9 @@
+Experiment 01
+
+Parallelism vs. Memory
+
+Hypothesis: inference on diffusion with multithreading causes execessive synchronization.
+
+- 4 images on 24 threads
+- How do threads work on each layers?
+
