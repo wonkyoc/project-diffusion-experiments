@@ -10,6 +10,7 @@ from diffusers.utils import logging
 
 from tqdm.auto import tqdm
 import time
+import os
 
 
 def make_image(i):
@@ -33,8 +34,8 @@ scheduler = DPMSolverMultistepScheduler.from_pretrained(model_id, subfolder="sch
 
 # Hyperparameters
 device = "cpu"
-batch_size = 1
-core = 24
+batch_size = 2
+core = 2
 height, width = 512, 512
 prompt = "a portrait of a woman with medium length black hair and a fringe, face close up, light blue eyeliner, wearing sports trousers and a sweatshot, dancing in a ballet studio, lensbaby"
 prompts = [prompt] * batch_size
@@ -74,7 +75,7 @@ total = 0
 with profile(activities=[ProfilerActivity.CPU],
         profile_memory=True,
         with_stack=True,
-        on_trace_ready=torch.profiler.tensorboard_trace_handler(f'./{filename}.trace'),
+        on_trace_ready=torch.profiler.tensorboard_trace_handler(f'./results/{filename}.trace'),
         record_shapes=True) as prof:
     for t in tqdm(scheduler.timesteps):
         # expand the latents if we are doing classifier-free guidance to avoid doing two forward passes.
@@ -101,14 +102,14 @@ with profile(activities=[ProfilerActivity.CPU],
         # scale and decode the image latents with vae
 
 logger.info(prof.key_averages().table(sort_by="cpu_memory_usage", row_limit=10))
-prof.export_memory_timeline(f"{filename}-memory.html", device="cpu")
-prof.export_memory_timeline(f"{filename}-memory.raw.json.gz", device="cpu")
-prof.export_memory_timeline(f"{filename}-memory.json.gz", device="cpu")
+prof.export_memory_timeline(f"results/{filename}-memory.html", device="cpu")
+prof.export_memory_timeline(f"results/{filename}-memory.raw.json.gz", device="cpu")
+prof.export_memory_timeline(f"results/{filename}-memory.json.gz", device="cpu")
 logger.info(f"avg_time={total/len(scheduler.timesteps)}")
 
 latents = 1 / 0.18215 * latents
 
-torch.set_num_threads(24)
+torch.set_num_threads(os.cpu_count())
 start = time.time()
 with torch.no_grad():
     decoded_images = vae.decode(latents).sample
@@ -124,6 +125,6 @@ else:
     rest = int(batch_size / 2)
     images = make_image_grid(images, 2, int(batch_size / 2))
 
-images.save(f"{filename}.png")
+images.save(f"results/{filename}.png")
 
 

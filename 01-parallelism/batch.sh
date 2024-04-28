@@ -1,5 +1,5 @@
 #!/bin/bash
 
-for ((i = 0; i < 24; i++)); do
+for ((i = 4; i < 6; i++)); do
     taskset -c $i python main.py &
 done 
