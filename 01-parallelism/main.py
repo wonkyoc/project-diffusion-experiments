@@ -4,13 +4,14 @@ from torch.profiler import profile, record_function, ProfilerActivity
 from PIL import Image
 from transformers import CLIPTextModel, CLIPTokenizer
 from diffusers import StableDiffusionPipeline, AutoencoderKL, UNet2DConditionModel, \
-        PNDMScheduler, DPMSolverMultistepScheduler
+        PNDMScheduler, DPMSolverMultistepScheduler, EulerAncestralDiscreteScheduler
 from diffusers.utils import make_image_grid
 from diffusers.utils import logging
 
 from tqdm.auto import tqdm
 import time
 import os
+import argparse
 
 
 def make_image(i):
@@ -18,28 +19,41 @@ def make_image(i):
     i = (i.permute(1, 2, 0) * 255).to(torch.uint8).cpu().numpy()
     return Image.fromarray(i)
 
+# cmd argument
+parser = argparse.ArgumentParser()
+parser.add_argument("-p", "--prompt", action="store")
+parser.add_argument("-t", "--threads", type=int, action="store")
+parser.add_argument("-s", "--steps", type=int, action="store")
+parser.add_argument("-b", "--batch-size", type=int, action="store")
+args = parser.parse_args()
+
+
 # Debugging
 logging.set_verbosity_info()
 logger = logging.get_logger("diffusers")
 
 # Model
 model_id = "runwayml/stable-diffusion-v1-5"
+#model_id = "~/git/models/sd-v1-5.ckpt"
 vae = AutoencoderKL.from_pretrained(model_id, subfolder="vae", use_safetensors=True)
 tokenizer = CLIPTokenizer.from_pretrained(model_id, subfolder="tokenizer")
 text_encoder = CLIPTextModel.from_pretrained(model_id, subfolder="text_encoder", 
         use_safetensors=True)
 unet = UNet2DConditionModel.from_pretrained(model_id, subfolder="unet",
         use_safetensors=True)
-scheduler = DPMSolverMultistepScheduler.from_pretrained(model_id, subfolder="scheduler")
+#scheduler = DPMSolverMultistepScheduler.from_pretrained(model_id, subfolder="scheduler")
+scheduler = EulerAncestralDiscreteScheduler.from_pretrained(model_id, subfolder="scheduler")
 
 # Hyperparameters
 device = "cpu"
-batch_size = 2
-core = 2
+batch_size = 1
+core = args.threads
+prompt = args.prompt
+num_inference_steps = args.steps
+
 height, width = 512, 512
-prompt = "a portrait of a woman with medium length black hair and a fringe, face close up, light blue eyeliner, wearing sports trousers and a sweatshot, dancing in a ballet studio, lensbaby"
+#prompt = "a portrait of a woman with medium length black hair and a fringe, face close up, light blue eyeliner, wearing sports trousers and a sweatshot, dancing in a ballet studio, lensbaby"
 prompts = [prompt] * batch_size
-num_inference_steps = 1
 guidance_scale = 7.5
 generator = [torch.Generator("cpu").manual_seed(i) for i in range(batch_size)]
 filename = f"c{core}-b{batch_size}"
