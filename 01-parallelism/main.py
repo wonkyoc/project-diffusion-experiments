@@ -119,7 +119,8 @@ logger.info(prof.key_averages().table(sort_by="cpu_memory_usage", row_limit=10))
 prof.export_memory_timeline(f"results/{filename}-memory.html", device="cpu")
 prof.export_memory_timeline(f"results/{filename}-memory.raw.json.gz", device="cpu")
 prof.export_memory_timeline(f"results/{filename}-memory.json.gz", device="cpu")
-logger.info(f"avg_time={total/len(scheduler.timesteps)}")
+#logger.info(f"avg_time={total/len(scheduler.timesteps)}")
+print(f"avg_time={total/len(scheduler.timesteps)}")
 
 latents = 1 / 0.18215 * latents
 
