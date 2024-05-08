@@ -22,7 +22,7 @@ run_diffusers() {
     $PIN python $EXP_DIR/01-parallelism/main.py \
         --prompt "$PROMPT" \
         --threads $1 \
-        --steps $2 > $LOG_DIR/$HOSTNAME-diffusers-t$2.log
+        --steps $2 > $LOG_DIR/$HOSTNAME-diffusers-t$1.log
 }
 
 run_sdcpp() {
@@ -32,7 +32,7 @@ run_sdcpp() {
         --prompt "$PROMPT" \
         --threads $1    \
         --steps $2   \
-        -v --color > $LOG_DIR/$HOSTNAME-sdcpp-t$2.log
+        -v --color > $LOG_DIR/$HOSTNAME-sdcpp-t$1.log
 }
 
 for t in ${THREADS[@]}; do
