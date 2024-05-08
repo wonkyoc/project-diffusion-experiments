@@ -12,13 +12,14 @@ LOG_DIR=$HOME/project-diffusion-experiments/00-profile/results
 
 # hyperparameters
 THREADS=(1 2 4 8 12 20 24)
+#PIN="taskset -c 4-7"
 STEPS=1
 PROMPT="an oil surrealist painting of a dreamworld on a seashore where clocks and watches appear to be inexplicably limp and melting in the desolate landscape. a table on the left, with a golden watch swarmed by ants. a strange fleshy creature in the center of the painting"
 
 
 run_diffusers() {
     echo "Run Diffusers"
-    python $EXP_DIR/01-parallelism/main.py \
+    $PIN python $EXP_DIR/01-parallelism/main.py \
         --prompt "$1" \
         --threads $2 \
         --steps $3 > $LOG_DIR/diffusers-t$2.log
@@ -26,7 +27,7 @@ run_diffusers() {
 
 run_sdcpp() {
     echo "Run stable-diffusion.cpp"
-    $SDCPP_DIR/build/bin/sd -m $MODEL_DIR/sd-v1-5.ckpt \
+    $PIN $SDCPP_DIR/build/bin/sd -m $MODEL_DIR/sd-v1-5.ckpt \
         --sampling-method euler_a \
         --prompt "$1" \
         --threads $2    \
