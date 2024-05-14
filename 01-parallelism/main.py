@@ -1,5 +1,7 @@
+#!/home/wonkyoc/miniconda3/bin/python
+
 import torch
-import torchvision.models as models
+#import torchvision.models as models
 from torch.profiler import profile, record_function, ProfilerActivity
 from PIL import Image
 from transformers import CLIPTextModel, CLIPTokenizer
@@ -22,9 +24,9 @@ def make_image(i):
 # cmd argument
 parser = argparse.ArgumentParser()
 parser.add_argument("-p", "--prompt", action="store")
-parser.add_argument("-t", "--threads", type=int, action="store")
+parser.add_argument("-t", "--threads", default=24, type=int, action="store")
 parser.add_argument("-s", "--steps", type=int, action="store")
-parser.add_argument("-b", "--batch-size", type=int, action="store")
+parser.add_argument("-b", "--batch-size", default=1, type=int, action="store")
 args = parser.parse_args()
 
 
@@ -46,7 +48,7 @@ scheduler = EulerAncestralDiscreteScheduler.from_pretrained(model_id, subfolder=
 
 # Hyperparameters
 device = "cpu"
-batch_size = 1
+batch_size = args.batch_size
 core = args.threads
 prompt = args.prompt
 num_inference_steps = args.steps
@@ -119,12 +121,12 @@ logger.info(prof.key_averages().table(sort_by="cpu_memory_usage", row_limit=10))
 prof.export_memory_timeline(f"results/{filename}-memory.html", device="cpu")
 prof.export_memory_timeline(f"results/{filename}-memory.raw.json.gz", device="cpu")
 prof.export_memory_timeline(f"results/{filename}-memory.json.gz", device="cpu")
-#logger.info(f"avg_time={total/len(scheduler.timesteps)}")
+logger.info(f"avg_time={total/len(scheduler.timesteps)}")
 print(f"avg_time={total/len(scheduler.timesteps)}")
 
 latents = 1 / 0.18215 * latents
 
-torch.set_num_threads(os.cpu_count())
+#torch.set_num_threads(os.cpu_count())
 start = time.time()
 with torch.no_grad():
     decoded_images = vae.decode(latents).sample
