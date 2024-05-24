@@ -7,3 +7,13 @@ Hypothesis: inference on diffusion with multithreading causes execessive synchro
 - 4 images on 24 threads
 - How do threads work on each layers?
 
+
+1. Requirement
+
+pip install diffusers["torch"] transformers
+
+2. Run
+change $HOME in run.sh and then run
+
+bash /run.sh
+
