@@ -10,7 +10,7 @@ EXP_DIR=$HOME/project-diffusion-experiments
 
 # hyperparameters
 THREADS=4
-STEPS=1
+STEPS=20
 PROMPT="an oil surrealist painting of a dreamworld on a seashore where clocks and watches appear to be inexplicably limp and melting in the desolate landscape. a table on the left, with a golden watch swarmed by ants. a strange fleshy creature in the center of the painting"
 
 

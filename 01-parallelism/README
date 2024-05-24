@@ -15,5 +15,5 @@ pip install diffusers["torch"] transformers
 2. Run
 change $HOME in run.sh and then run
 
-bash /run.sh
+bash run.sh
 

@@ -133,7 +133,7 @@ def run_inference(logger, args):
         rest = int(batch_size / 2)
         images = make_image_grid(images, 2, int(batch_size / 2))
 
-    images.save(f"results/{filename}.png")
+    images.save(f"{filename}.png")
 
 if __name__ == "__main__":
     # cmd argument
