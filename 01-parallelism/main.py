@@ -1,5 +1,7 @@
+#!/home/wonkyoc/miniconda3/bin/python
+
 import torch
-import torchvision.models as models
+#import torchvision.models as models
 from torch.profiler import profile, record_function, ProfilerActivity
 from PIL import Image
 from transformers import CLIPTextModel, CLIPTokenizer
@@ -18,7 +20,6 @@ def make_image(i):
     i = (i / 2 + 0.5).clamp(0, 1).squeeze()
     i = (i.permute(1, 2, 0) * 255).to(torch.uint8).cpu().numpy()
     return Image.fromarray(i)
-
 
 def run_inference(logger, args):
     # Model
@@ -125,7 +126,6 @@ def run_inference(logger, args):
 
     print(f"vae {end - start}")
 
-
     images = [make_image(i) for i in decoded_images]
     if batch_size == 1:
         images = make_image_grid(images, batch_size, batch_size)
@@ -152,5 +152,3 @@ if __name__ == "__main__":
     logging.set_verbosity_info()
     logger = logging.get_logger("diffusers")
     run_inference(logger, args)
-
-
