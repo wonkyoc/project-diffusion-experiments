@@ -15,13 +15,42 @@ import time
 import os
 import argparse
 
+TEST = 1
+print(os.getpid())
+
+class Perf:
+    def __init__(self, args):
+        self.iteration = args.iteration
+        self.total_cond_time = 0
+        self.total_uncond_time = 0
+        self.total_unet_time = 0
+        self.total_denoise_time = 0
+        self.total_vae_time = 0
+        if TEST == 1:
+            self.log_file = f"test-{args.device}-t{args.threads}-b{args.batch_size}.log"
+        else:
+            self.log_file = f"{args.device}-t{args.threads}-b{args.batch_size}.log"
+
+    def save_log(self):
+        avg_cond_time = self.total_cond_time / self.iteration
+        avg_uncond_time = self.total_uncond_time / self.iteration
+        avg_unet_time = self.total_unet_time / self.iteration
+        avg_denoise_time = self.total_denoise_time / self.iteration
+        avg_vae_time = self.total_vae_time / self.iteration
+        with open(self.log_file, "w") as f:
+            f.write(f"avg_cond_time (all steps)={avg_cond_time}\n")
+            f.write(f"avg_uncond_time (all steps)={avg_uncond_time}\n")
+            f.write(f"avg_unet_time (all steps)={avg_unet_time}\n")
+            f.write(f"avg_denoise_time (per step)={avg_denoise_time}\n")
+            f.write(f"avg_vae_time={avg_vae_time}")
+        
 
 def make_image(i):
     i = (i / 2 + 0.5).clamp(0, 1).squeeze()
     i = (i.permute(1, 2, 0) * 255).to(torch.uint8).cpu().numpy()
     return Image.fromarray(i)
 
-def run_inference(logger, args):
+def run_inference(logger, args, perf):
     # Model
     model_id = "runwayml/stable-diffusion-v1-5"
     #model_id = "~/git/models/sd-v1-5.ckpt"
@@ -36,30 +65,42 @@ def run_inference(logger, args):
 
     # Hyperparameters
     device = args.device
-    batch_size = 1
-    core = args.threads
+    batch_size = args.batch_size
+    threads = args.threads
     prompt = args.prompt
     num_inference_steps = args.steps
 
-    torch.set_num_threads(core)
+    print(f"config: device={device} bs={batch_size} threads={threads} steps={num_inference_steps}")
+
+    torch.set_num_threads(threads)
     height, width = 512, 512
     #prompt = "a portrait of a woman with medium length black hair and a fringe, face close up, light blue eyeliner, wearing sports trousers and a sweatshot, dancing in a ballet studio, lensbaby"
     prompts = [prompt] * batch_size
     guidance_scale = 7.5
-    generator = [torch.Generator("cpu").manual_seed(i) for i in range(batch_size)]
-    filename = f"c{core}-b{batch_size}"
+    generator = [torch.Generator(device).manual_seed(i) for i in range(batch_size)]
+    filename = f"c{threads}-b{batch_size}"
+
+    vae.to(device)
+    text_encoder.to(device)
+    unet.to(device)
 
 
     # Tokenizer
     text_input = tokenizer(prompts, padding="max_length", 
             max_length=tokenizer.model_max_length, truncation=True, return_tensors="pt")
+    start = time.time()
     with torch.no_grad():
         text_embeddings = text_encoder(text_input.input_ids.to(device))[0]
+    perf.total_cond_time += time.time() - start
 
     # Unconditional text prompt
     max_length = text_input.input_ids.shape[-1]
     uncond_input = tokenizer([""] * batch_size, padding="max_length", max_length=max_length, return_tensors="pt")
+
+    start = time.time()
     uncond_embeddings = text_encoder(uncond_input.input_ids.to(device))[0]
+    perf.total_uncond_time += time.time() - start
+
     text_embeddings = torch.cat([uncond_embeddings, text_embeddings])
 
     # create random latents
@@ -81,54 +122,50 @@ def run_inference(logger, args):
 #            on_trace_ready=torch.profiler.tensorboard_trace_handler(f'./results/{filename}.trace'),
 #            record_shapes=True) as prof:
     total_denoise_time = 0
-    for i in range(args.iteration):
-        start_iter = time.time()
-        total = 0
-        for t in tqdm(scheduler.timesteps):
-            # expand the latents if we are doing classifier-free guidance to avoid doing two forward passes.
-            latent_model_input = torch.cat([latents] * 2)
-            latent_model_input = scheduler.scale_model_input(latent_model_input, timestep=t)
+    for t in tqdm(scheduler.timesteps):
 
-            # predict the noise residual
-            start = time.time()
-            with record_function("## U-Net ##"):
-                with torch.no_grad():
-                    noise_pred = unet(latent_model_input, t, encoder_hidden_states=text_embeddings).sample
-            #print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=10))
-            #print(prof.key_averages().table(sort_by="self_cpu_memory_usage", row_limit=10))
-            end = time.time()
-            #logger.info(f"t={t} time={end - start}")
-            total += end - start
+        # expand the latents if we are doing classifier-free guidance to avoid doing two forward passes.
+        latent_model_input = torch.cat([latents] * 2)
+        latent_model_input = scheduler.scale_model_input(latent_model_input, timestep=t)
 
-            # perform guidance
-            noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-            noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
+        # predict the noise residual
+        start = time.time()
+        #with record_function("## U-Net ##"):
+        with torch.no_grad():
+            noise_pred = unet(latent_model_input, t, encoder_hidden_states=text_embeddings).sample
+        #print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=10))
+        #print(prof.key_averages().table(sort_by="self_cpu_memory_usage", row_limit=10))
+        #logger.info(f"t={t} time={end - start}")
+        total_denoise_time += time.time() - start
 
-            # compute the previous noisy sample x_t -> x_t-1
-            latents = scheduler.step(noise_pred, t, latents).prev_sample
-            # scale and decode the image latents with vae
-        logger.info(f"avg_step_time={total/len(scheduler.timesteps)}")
-        total_denoise_time = time.time() - start_iter
-        logger.info(f"avg_denoise_time={total_denoise_time/args.iteration}")
+        # perform guidance
+        noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+        noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
+
+        # compute the previous noisy sample x_t -> x_t-1
+        latents = scheduler.step(noise_pred, t, latents).prev_sample
+        avg_denoise_time = total_denoise_time / len(scheduler.timesteps)
+    perf.total_unet_time += total_denoise_time
+    perf.total_denoise_time += avg_denoise_time
 
     #logger.info(prof.key_averages().table(sort_by="cpu_memory_usage", row_limit=10))
     #prof.export_memory_timeline(f"results/{filename}-memory.html", device="cpu")
     #prof.export_memory_timeline(f"results/{filename}-memory.raw.json.gz", device="cpu")
     #prof.export_memory_timeline(f"results/{filename}-memory.json.gz", device="cpu")
 
+    # scale and decode the image latents with vae
     latents = 1 / 0.18215 * latents
 
-    torch.set_num_threads(os.cpu_count())
     start = time.time()
     with torch.no_grad():
         decoded_images = vae.decode(latents).sample
-    end = time.time()
-
-    print(f"vae {end - start}")
+    perf.total_vae_time += time.time() - start
 
     images = [make_image(i) for i in decoded_images]
     if batch_size == 1:
         images = make_image_grid(images, batch_size, batch_size)
+    elif batch_size == 3:
+        images = make_image_grid(images, 1, 3)
     else:
         rest = int(batch_size / 2)
         images = make_image_grid(images, 2, int(batch_size / 2))
@@ -141,14 +178,21 @@ if __name__ == "__main__":
     parser.add_argument("-p", "--prompt", action="store")
     parser.add_argument("-t", "--threads", type=int, action="store")
     parser.add_argument("-s", "--steps", type=int, action="store")
-    parser.add_argument("-b", "--batch-size", type=int, action="store")
+    parser.add_argument("-b", "--batch_size", default=1, type=int, action="store")
     parser.add_argument("-d", "--device", default="cpu")
     parser.add_argument("-i", "--iteration", type=int, default=1)
-    #parser.add_argument("-o", "--output_file")
+    parser.add_argument("--log_path", action="store")
     args = parser.parse_args()
 
 
     # Debugging
     logging.set_verbosity_info()
     logger = logging.get_logger("diffusers")
-    run_inference(logger, args)
+    perf = Perf(args)
+
+    for i in range(args.iteration):
+        with torch.mps.profiler.profile(mode="interval", wait_until_completed=True):
+            run_inference(logger, args, perf)
+        time.sleep(5)
+    
+    perf.save_log()
