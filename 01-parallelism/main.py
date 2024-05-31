@@ -192,10 +192,15 @@ if __name__ == "__main__":
     logger = logging.get_logger("diffusers")
     perf = Perf(args)
 
-    # xzl: mps profiler. 
-    for i in range(args.iteration):
-        with torch.mps.profiler.profile(mode="interval", wait_until_completed=True):
+    import platform
+    if platform.system() == 'Darwin':
+        # xzl: mps profiler. 
+        for i in range(args.iteration):
+            with torch.mps.profiler.profile(mode="interval", wait_until_completed=True):
+                run_inference(logger, args, perf)
+            time.sleep(5)   # xzl: why sleep???
+    else:
+        for i in range(args.iteration):
             run_inference(logger, args, perf)
-        time.sleep(5)
     
     perf.save_log()

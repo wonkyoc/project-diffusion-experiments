@@ -1,0 +1,4 @@
+xps15
+VERY SLOW. DIDNT COMPLETE.... WHY??? (torch not optmized for win???
+config: device=cpu bs=6 threads=6 steps=10
+ 50%|█████████████████████████████████████████▌                                         | 5/10 [05:59<06:02, 72.55s/it]

@@ -2,8 +2,13 @@
 
 
 #EXP_DIR=$(dirname $(readlink -f $0))
-HOME=/Users/xl6yq/workspace-stable-diffusion
+# mac
+#HOME=/Users/xl6yq/workspace-stable-diffusion
+
+# windows. gitbash
+HOME=/d/workspace-stable-diffusion
 MODEL_DIR=$HOME/models
+
 EXP_DIR=$HOME/project-diffusion-experiments
 #SDCPP_DIR=$HOME/stable-diffusion.cpp
 #DIFF_DIR=$HOME/diffusers
@@ -58,8 +63,8 @@ run_sdcpp() {
 
 # run_diffusers 12 4 "mps" 
 
-cores=16
-images=16
+cores=6
+images=6
 proc=1   # must <= images
 
 bs=$(($images / $proc)) # images per process
