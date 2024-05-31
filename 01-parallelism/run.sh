@@ -50,5 +50,5 @@ run_sdcpp() {
 #done
 
 # 1 CPU + 1 GPU
-run_diffusers 4 1 "cpu" &
-run_diffusers 4 3 "mps"
+run_diffusers 2 1 "cpu" &
+run_diffusers 2 1 "mps"

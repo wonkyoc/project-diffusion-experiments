@@ -1,5 +1,5 @@
 #!/home/wonkyoc/miniconda3/bin/python
-
+import gc
 import torch
 #import torchvision.models as models
 from torch.profiler import profile, record_function, ProfilerActivity
@@ -51,6 +51,7 @@ def make_image(i):
     return Image.fromarray(i)
 
 def run_inference(logger, args, perf):
+    gc.collect()
     # Model
     model_id = "runwayml/stable-diffusion-v1-5"
     #model_id = "~/git/models/sd-v1-5.ckpt"
@@ -194,5 +195,6 @@ if __name__ == "__main__":
         with torch.mps.profiler.profile(mode="interval", wait_until_completed=True):
             run_inference(logger, args, perf)
         time.sleep(5)
+        gc.collect()
     
     perf.save_log()
