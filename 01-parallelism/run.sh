@@ -2,7 +2,7 @@
 
 
 #EXP_DIR=$(dirname $(readlink -f $0))
-HOME=/Users/wonkyoc/git
+HOME=/Users/xl6yq/workspace-stable-diffusion
 MODEL_DIR=$HOME/models
 EXP_DIR=$HOME/project-diffusion-experiments
 #SDCPP_DIR=$HOME/stable-diffusion.cpp
@@ -10,7 +10,7 @@ EXP_DIR=$HOME/project-diffusion-experiments
 
 # hyperparameters
 THREADS=(4)
-BATCHS=(1)
+BATCHS=(2)
 DEVICES=("mps")
 STEPS=10
 ITER=1
@@ -50,5 +50,27 @@ run_sdcpp() {
 #done
 
 # 1 CPU + 1 GPU
-run_diffusers 4 1 "cpu" &
-run_diffusers 4 3 "mps"
+# run_diffusers 4 1 "cpu" &
+# run_diffusers 4 3 "mps"
+
+# $1 threads $2 bs
+# run_diffusers 12 4 "cpu" 
+
+# run_diffusers 12 4 "mps" 
+
+cores=16
+images=16
+proc=1   # must <= images
+
+bs=$(($images / $proc)) # images per process
+tr=$(($cores / $proc))  # thr per process
+
+# cpu, multiple instances
+# for i in 1 2
+for i in $(seq 1 $proc);
+do
+    #run_diffusers $tr $bs "cpu" >$HOSTNAME-diffusers-instance-$i.stdout  2>&1
+    run_diffusers $tr $bs "cpu" &
+done
+wait
+echo "All done"

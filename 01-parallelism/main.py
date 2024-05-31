@@ -16,8 +16,9 @@ import os
 import argparse
 
 TEST = 1
-print(os.getpid())
+print("pid=", os.getpid())
 
+# xzl: time measurement...write to a separate file
 class Perf:
     def __init__(self, args):
         self.iteration = args.iteration
@@ -27,9 +28,9 @@ class Perf:
         self.total_denoise_time = 0
         self.total_vae_time = 0
         if TEST == 1:
-            self.log_file = f"test-{args.device}-t{args.threads}-b{args.batch_size}.log"
+            self.log_file = f"test-{args.device}-t{args.threads}-b{args.batch_size}-pid{os.getpid()}.log"
         else:
-            self.log_file = f"{args.device}-t{args.threads}-b{args.batch_size}.log"
+            self.log_file = f"{args.device}-t{args.threads}-b{args.batch_size}-pid{os.getpid()}.log"
 
     def save_log(self):
         avg_cond_time = self.total_cond_time / self.iteration
@@ -72,18 +73,17 @@ def run_inference(logger, args, perf):
 
     print(f"config: device={device} bs={batch_size} threads={threads} steps={num_inference_steps}")
 
-    torch.set_num_threads(threads)
+    torch.set_num_threads(threads)      # xzl: is this useful at all?
     height, width = 512, 512
     #prompt = "a portrait of a woman with medium length black hair and a fringe, face close up, light blue eyeliner, wearing sports trousers and a sweatshot, dancing in a ballet studio, lensbaby"
-    prompts = [prompt] * batch_size
+    prompts = [prompt] * batch_size   # xzl: duplicate prompts.... by bs
     guidance_scale = 7.5
     generator = [torch.Generator(device).manual_seed(i) for i in range(batch_size)]
-    filename = f"c{threads}-b{batch_size}"
+    filename = f"c{threads}-b{batch_size}"  # xzl: output filename
 
     vae.to(device)
     text_encoder.to(device)
     unet.to(device)
-
 
     # Tokenizer
     text_input = tokenizer(prompts, padding="max_length", 
@@ -111,6 +111,8 @@ def run_inference(logger, args, perf):
             ]
     latents = torch.cat(latents, dim=0).to(device)
     latents = latents * scheduler.init_noise_sigma
+
+    # xzl: latents shape (bs, ch, 64, 64)  height // 8, width // 8
 
     # set time step
     scheduler.set_timesteps(num_inference_steps)
@@ -190,6 +192,7 @@ if __name__ == "__main__":
     logger = logging.get_logger("diffusers")
     perf = Perf(args)
 
+    # xzl: mps profiler. 
     for i in range(args.iteration):
         with torch.mps.profiler.profile(mode="interval", wait_until_completed=True):
             run_inference(logger, args, perf)
