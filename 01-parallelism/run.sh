@@ -67,10 +67,13 @@ tr=$(($cores / $proc))  # thr per process
 
 # cpu, multiple instances
 # for i in 1 2
-for i in $(seq 1 $proc);
-do
-    #run_diffusers $tr $bs "cpu" >$HOSTNAME-diffusers-instance-$i.stdout  2>&1
-    run_diffusers $tr $bs "cpu" &
-done
-wait
-echo "All done"
+# for i in $(seq 1 $proc);
+# do
+#     #run_diffusers $tr $bs "cpu" >$HOSTNAME-diffusers-instance-$i.stdout  2>&1
+#     run_diffusers $tr $bs "cpu" &
+# done
+# wait
+# echo "All done"
+
+# $1 threads $2 bs
+run_diffusers 4 16 "mps" 
