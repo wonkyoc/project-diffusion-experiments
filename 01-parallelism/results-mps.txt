@@ -1,0 +1,14 @@
+mbp m1 pro 2021, 16GB 
+bs=1, fast
+config: device=mps bs=1 threads=4 steps=10
+100%|███████████████████████████████████████████████████████████████████████████████████████████| 10/10 [00:17<00:00,  1.78s/it]
+(venv) xzl@mbp16-2021 ~/workspace-stable-diffusion/project-diffusion-experiments/01-
+
+bs=2, (if enough mem)
+config: device=mps bs=2 threads=4 steps=10
+100%|███████████████████████████████████████████████████████████████████████████████████████████| 10/10 [00:25<00:00,  2.56s/it]
+             
+
+bs=4 (very slow), >100s per it (likely OOM, activating swap area
+                                
+
