@@ -26,7 +26,6 @@ class Inference():
         self.batch_size = args.batch_size
         self.threads = args.threads
         self.prompt = args.prompt   # single prompt
-        self.prompts = [self.prompt] * self.batch_size
         self.num_inference_steps = args.steps
         self.height, self.width = 512, 512
         self.guidance_scale = 7.5
@@ -69,11 +68,14 @@ class Inference():
 
     def run(self):
         gc.collect()
-       
+        
         if self.device == "mps":
+            self.batch_size = self.args.gpu_batch_size
             self.vae.to(self.device)
             self.text_encoder.to(self.device)
             self.unet.to(self.device)
+
+        self.prompts = [self.prompt] * self.batch_size
         
         # move here: err: cannot pickle 'torch._C.Generator'
         self.generator = [torch.Generator(self.device).manual_seed(i) for i in range(self.batch_size)]
@@ -197,11 +199,12 @@ if __name__ == "__main__":
     parser.add_argument("-t", "--threads", type=int, action="store")
     parser.add_argument("-s", "--steps", type=int, action="store")
     parser.add_argument("-b", "--batch_size", default=1, type=int, action="store")
+    parser.add_argument("--gpu_batch_size", default=1, type=int, action="store")
     parser.add_argument("-d", "--device", default="cpu")
     parser.add_argument("-i", "--iteration", type=int, default=1)
     parser.add_argument("--log_dir", action="store")
     parser.add_argument("--num_cpu_instances", type=int, action="store")
-    parser.add_argument("--num_gpu_instances", type=int, action="store")
+    parser.add_argument("--num_gpu_instances", type=int, action="store", default=1)
     parser.add_argument("--model", action="store")
     args = parser.parse_args()
 
@@ -211,11 +214,12 @@ if __name__ == "__main__":
 
     processes = []
     inst.num_instances = num_instances = args.num_cpu_instances + args.num_gpu_instances
+    num_images = (args.num_cpu_instances * args.batch_size) + (args.num_gpu_instances * args.gpu_batch_size)
 
     # audit config
     with open(f"{args.log_dir}/config", "w") as f:
-        f.write(f"bs={args.batch_size} threads={args.threads} " +
-        f"steps={args.steps} num_instances={num_instances} " + 
+        f.write(f"bs={args.batch_size} gbs={args.gpu_batch_size} threads={args.threads} " +
+        f"steps={args.steps} num_instances={num_instances} num_images={num_images}" + 
         f"model={args.model} " + f"num_cpu_isntances={args.num_cpu_instances} num_gpu_instances={args.num_gpu_instances}")
 
     # generate cpu instances

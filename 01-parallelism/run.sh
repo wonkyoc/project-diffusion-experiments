@@ -15,8 +15,7 @@ STEPS=10
 ITER=1
 PROMPT="an oil surrealist painting of a dreamworld on a seashore where clocks and watches appear to be inexplicably limp and melting in the desolate landscape. a table on the left, with a golden watch swarmed by ants. a strange fleshy creature in the center of the painting"
 
-MODELS=("nota-ai/bk-sdm-base" "nota-ai/bk-sdm-small" "nota-ai/bk-sdm-tiny"
-    "runwayml/stable-diffusion-v1-5")
+MODELS=("nota-ai/bk-sdm-base" "nota-ai/bk-sdm-small" "nota-ai/bk-sdm-tiny" "runwayml/stable-diffusion-v1-5")
 
 run_diffusers() {
     t=$(date "+%Y%m%d.%H%M%S")
@@ -30,8 +29,8 @@ run_diffusers() {
         --steps $STEPS \
         --iteration $ITER \
         --batch_size "$2" \
+        --gpu_batch_size "$4" \
         --num_cpu_instances "$3" \
-        --num_gpu_instances "$4" \
         --model "$5" \
         --log_dir $t
 
@@ -75,11 +74,11 @@ tr=$((cores / proc))  # thr per process
 #wait
 
 
-# run_diffusers $tr $bs $num_cpu_instances $num_gpu_instances
+# run_diffusers $tr $bs $num_cpu_instances $gpu_batch_size
 for m in "${MODELS[@]}"; do
     echo "$m"
-    run_diffusers $tr $bs 4 0 "$m"
-    run_diffusers $tr $bs 3 1 "$m"
+    #run_diffusers $tr $bs 4 0 "$m"
+    #run_diffusers $tr $bs 3 1 "$m"
     run_diffusers $tr $bs 2 2 "$m"
 done
 #>> $HOSTNAME-diffusers-instance-$i.stdout  2>&1 &
