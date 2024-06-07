@@ -11,16 +11,17 @@ EXP_DIR=$HOME/project-diffusion-experiments
 # hyperparameters
 THREADS=(4)
 BATCHS=(1)
-DEVICES=("mps")
 STEPS=10
 ITER=1
 PROMPT="an oil surrealist painting of a dreamworld on a seashore where clocks and watches appear to be inexplicably limp and melting in the desolate landscape. a table on the left, with a golden watch swarmed by ants. a strange fleshy creature in the center of the painting"
 
+MODELS=("nota-ai/bk-sdm-base" "nota-ai/bk-sdm-small" "nota-ai/bk-sdm-tiny"
+    "runwayml/stable-diffusion-v1-5")
 
 run_diffusers() {
-    echo "Run Diffusers"
     t=$(date "+%Y%m%d.%H%M%S")
-
+    
+    echo "LOG_DIR: $t"
     mkdir -p "$t"
     
     /Users/wonkyoc/miniconda3/bin/python $EXP_DIR/01-parallelism/main.py \
@@ -31,6 +32,7 @@ run_diffusers() {
         --batch_size "$2" \
         --num_cpu_instances "$3" \
         --num_gpu_instances "$4" \
+        --model "$5" \
         --log_dir $t
 
 }
@@ -74,6 +76,11 @@ tr=$((cores / proc))  # thr per process
 
 
 # run_diffusers $tr $bs $num_cpu_instances $num_gpu_instances
-run_diffusers $tr $bs 2 2
+for m in "${MODELS[@]}"; do
+    echo "$m"
+    run_diffusers $tr $bs 4 0 "$m"
+    run_diffusers $tr $bs 3 1 "$m"
+    run_diffusers $tr $bs 2 2 "$m"
+done
 #>> $HOSTNAME-diffusers-instance-$i.stdout  2>&1 &
 echo "All done"

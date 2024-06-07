@@ -30,7 +30,6 @@ class Inference():
         self.num_inference_steps = args.steps
         self.height, self.width = 512, 512
         self.guidance_scale = 7.5
-        #self.model_id = "runwayml/stable-diffusion-v1-5"
         self.model_id = args.model
 
         # logging
@@ -203,9 +202,8 @@ if __name__ == "__main__":
     parser.add_argument("--log_dir", action="store")
     parser.add_argument("--num_cpu_instances", type=int, action="store")
     parser.add_argument("--num_gpu_instances", type=int, action="store")
+    parser.add_argument("--model", action="store")
     args = parser.parse_args()
-
-    args.model = "nota-ai/bk-sdm-small"
 
     mp.set_start_method("spawn")
     inst = Inference(args)
