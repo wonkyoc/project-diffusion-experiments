@@ -19,13 +19,19 @@ PROMPT="an oil surrealist painting of a dreamworld on a seashore where clocks an
 
 run_diffusers() {
     echo "Run Diffusers"
-    python $EXP_DIR/01-parallelism/main.py \
+    t=$(date "+%Y%m%d.%H%M%S")
+
+    mkdir -p "$t"
+    
+    /Users/wonkyoc/miniconda3/bin/python $EXP_DIR/01-parallelism/main.py \
         --prompt "$PROMPT" \
         --threads "$1" \
         --steps $STEPS \
         --iteration $ITER \
         --batch_size "$2" \
-        --device "$3"
+        --num_cpu_instances "$3" \
+        --num_gpu_instances "$4" \
+        --log_dir $t
 
 }
 
@@ -39,6 +45,14 @@ run_sdcpp() {
         -v --color
 }
 
+cores=1
+images=1
+proc=1   # must <= images
+
+
+bs=$((images / proc)) # images per process
+tr=$((cores / proc))  # thr per process
+
 #for d in "${DEVICES[@]}"; do
 #    for b in "${BATCHS[@]}"; do
 #        for t in "${THREADS[@]}"; do
@@ -49,6 +63,17 @@ run_sdcpp() {
 #    done
 #done
 
-# 1 CPU + 1 GPU
-run_diffusers 2 1 "cpu" &
-run_diffusers 2 1 "mps"
+#for i in $(seq 1 $proc);
+#do
+#    run_diffusers $tr $bs "cpu" $proc >> $HOSTNAME-diffusers-instance-$i.stdout  2>&1 &
+#    # >> test-mps-bs2.stdout  2>&1 &
+#    #run_diffusers $tr $bs "cpu" &
+#done
+#run_diffusers 1 1 "mps" &
+#wait
+
+
+# run_diffusers $tr $bs $num_cpu_instances $num_gpu_instances
+run_diffusers $tr $bs 2 2
+#>> $HOSTNAME-diffusers-instance-$i.stdout  2>&1 &
+echo "All done"

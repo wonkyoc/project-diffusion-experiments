@@ -1,7 +1,6 @@
 #!/home/wonkyoc/miniconda3/bin/python
 import gc
 import torch
-#import torchvision.models as models
 from torch.profiler import profile, record_function, ProfilerActivity
 from PIL import Image
 from transformers import CLIPTextModel, CLIPTokenizer
@@ -31,8 +30,11 @@ class Inference():
         self.num_inference_steps = args.steps
         self.height, self.width = 512, 512
         self.guidance_scale = 7.5
+        #self.model_id = "runwayml/stable-diffusion-v1-5"
+        self.model_id = args.model
 
         # logging
+        self.log_dir = args.log_dir
         self.total_cond_time = 0
         self.total_uncond_time = 0
         self.total_unet_time = 0
@@ -49,17 +51,17 @@ class Inference():
         # torch setting
         torch.set_num_threads(self.threads)
 
+
     def load_models(self):
         # Model
-        model_id = "runwayml/stable-diffusion-v1-5"
-        self.vae = AutoencoderKL.from_pretrained(model_id, subfolder="vae", use_safetensors=True)
-        self.tokenizer = CLIPTokenizer.from_pretrained(model_id, subfolder="tokenizer")
-        self.text_encoder = CLIPTextModel.from_pretrained(model_id, subfolder="text_encoder", 
+        self.vae = AutoencoderKL.from_pretrained(self.model_id, subfolder="vae", use_safetensors=True)
+        self.tokenizer = CLIPTokenizer.from_pretrained(self.model_id, subfolder="tokenizer")
+        self.text_encoder = CLIPTextModel.from_pretrained(self.model_id, subfolder="text_encoder", 
                 use_safetensors=True)
-        self.unet = UNet2DConditionModel.from_pretrained(model_id, subfolder="unet",
+        self.unet = UNet2DConditionModel.from_pretrained(self.model_id, subfolder="unet",
                 use_safetensors=True)
         #scheduler = DPMSolverMultistepScheduler.from_pretrained(model_id, subfolder="scheduler")
-        self.scheduler = EulerAncestralDiscreteScheduler.from_pretrained(model_id, subfolder="scheduler")
+        self.scheduler = EulerAncestralDiscreteScheduler.from_pretrained(self.model_id, subfolder="scheduler")
 
         if self.device == "cpu":
             self.unet.share_memory()
@@ -164,22 +166,22 @@ class Inference():
             rest = int(self.batch_size / 2)
             images = make_image_grid(images, 2, int(self.batch_size / 2))
 
-        images.save(f"{self.image_name}.png")
+        images.save(f"{self.log_dir}/{self.image_name}.png")
         gc.collect()
 
     def save_log(self):
         if self.debug == True:
-            self.log_file = f"debug-pid{os.getpid()}-{self.device}-t{self.threads}-b{self.batch_size}-p{self.args.num_processes}.log"
+            self.log_name = f"{self.log_dir}/debug-pid{os.getpid()}-{self.device}-t{self.threads}-b{self.batch_size}-p{self.num_instances}"
         else:
-            self.log_file = f"pid{os.getpid()}-{self.device}-t{self.threads}-b{self.batch_size}-p{self.args.num_processes}.log"
+            self.log_name = f"{self.log_dir}/pid{os.getpid()}-{self.device}-t{self.threads}-b{self.batch_size}-p{self.num_instance}"
 
         avg_cond_time = self.total_cond_time / self.args.iteration
         avg_uncond_time = self.total_uncond_time / self.args.iteration
         avg_unet_time = self.total_unet_time / self.args.iteration
         avg_denoise_time = self.total_denoise_time / self.args.iteration
         avg_vae_time = self.total_vae_time / self.args.iteration
-        with open(self.log_file, "w") as f:
-            f.write(f"config: device={self.device} bs={self.batch_size} threads={self.threads} steps={self.num_inference_steps} procs={self.args.num_processes}\n")
+        
+        with open(f"{self.log_name}.log", "w") as f:
             f.write(f"avg_cond_time (all steps)={avg_cond_time}\n")
             f.write(f"avg_uncond_time (all steps)={avg_uncond_time}\n")
             f.write(f"avg_unet_time (all steps)={avg_unet_time}\n")
@@ -194,27 +196,46 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-p", "--prompt", action="store")
     parser.add_argument("-t", "--threads", type=int, action="store")
-    parser.add_argument("--num_processes", type=int, action="store", default=1)
     parser.add_argument("-s", "--steps", type=int, action="store")
     parser.add_argument("-b", "--batch_size", default=1, type=int, action="store")
     parser.add_argument("-d", "--device", default="cpu")
     parser.add_argument("-i", "--iteration", type=int, default=1)
-    parser.add_argument("--log_path", action="store")
+    parser.add_argument("--log_dir", action="store")
+    parser.add_argument("--num_cpu_instances", type=int, action="store")
+    parser.add_argument("--num_gpu_instances", type=int, action="store")
     args = parser.parse_args()
+
+    args.model = "nota-ai/bk-sdm-small"
 
     mp.set_start_method("spawn")
     inst = Inference(args)
     inst.load_models()
 
-    # inst.run()
-
     processes = []
-    for rank in range(args.num_processes):
+    inst.num_instances = num_instances = args.num_cpu_instances + args.num_gpu_instances
+
+    # audit config
+    with open(f"{args.log_dir}/config", "w") as f:
+        f.write(f"bs={args.batch_size} threads={args.threads} " +
+        f"steps={args.steps} num_instances={num_instances} " + 
+        f"model={args.model} " + f"num_cpu_isntances={args.num_cpu_instances} num_gpu_instances={args.num_gpu_instances}")
+
+    # generate cpu instances
+    inst.device = "cpu"
+    for rank in range(args.num_cpu_instances):
         p = mp.Process(target=run_process, args=(inst,))
         p.start()
         processes.append(p)
+
+    # generate gpu instances
+    inst.device = "mps"
+    for rank in range(args.num_gpu_instances):
+        p = mp.Process(target=run_process, args=(inst,))
+        p.start()
+        processes.append(p)
+
+    # wait 
     for p in processes:
         p.join()
 
-    #for i in range(args.iteration):
     #with torch.mps.profiler.profile(mode="interval", wait_until_completed=True):
