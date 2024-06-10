@@ -15,9 +15,29 @@ import time
 import os
 import argparse
 
+from multiprocessing.managers import BaseManager
+from enum import Enum
+
+
+class State(Enum):
+    IDLE = 0
+    RUNNING = 1
+
+class ResourceManager():
+    def __init__(self):
+        self.cpu_state = State.IDLE # XXX: not yet
+        self.gpu_state = State.IDLE
+    
+    def set_gpu_state(self, state):
+        self.gpu_state = state
+
+    def get_gpu_state(self):
+        return self.gpu_state
+
 
 class Inference():
-    def __init__(self, args):
+    def __init__(self, args, inst_id):
+        self.id = inst_id
         self.debug = True
 
         # Hyperparameters
@@ -38,6 +58,7 @@ class Inference():
         self.total_unet_time = 0
         self.total_denoise_time = 0
         self.total_vae_time = 0
+        self.copy_time = 0
 
         # pipeline
         self.vae = None
@@ -66,14 +87,18 @@ class Inference():
             self.vae.share_memory()
             self.text_encoder.share_memory()
 
-    def run(self):
+    def _copy_data(self, device):
+        self.device = device
+        self.text_encoder.to(device)
+        self.unet.to(device)
+        self.vae.to(device)
+
+    def run(self, ctx):
         gc.collect()
-        
+
         if self.device == "mps":
             self.batch_size = self.args.gpu_batch_size
-            self.vae.to(self.device)
-            self.text_encoder.to(self.device)
-            self.unet.to(self.device)
+            self._copy_data(self.device)
 
         self.prompts = [self.prompt] * self.batch_size
         
@@ -114,6 +139,18 @@ class Inference():
         # denoise
         _total_denoise_time = 0
         for t in tqdm(self.scheduler.timesteps):
+            if ctx.get_gpu_state() == State.IDLE and self.args.offload == True:
+                print(f"cpu-{self.inst_id} -> gpu-{self.inst_id}")
+
+                # move data/model to device
+                start = time.time()
+                self._copy_data("mps")
+                latents = latents.to("mps")
+                text_embeddings = text_embeddings.to("mps")
+                self.copy_time = time.time() - start
+
+                # change status
+                ctx.set_gpu_state(State.RUNNING)
 
             # expand the latents if we are doing classifier-free guidance to avoid doing two forward passes.
             latent_model_input = torch.cat([latents] * 2)
@@ -134,8 +171,6 @@ class Inference():
             avg_denoise_time = _total_denoise_time / len(self.scheduler.timesteps)
         self.total_unet_time += _total_denoise_time
         self.total_denoise_time += avg_denoise_time
-
-
 
         # scale and decode the image latents with vae
         latents = 1 / 0.18215 * latents
@@ -188,9 +223,20 @@ class Inference():
             f.write(f"avg_unet_time (all steps)={avg_unet_time}\n")
             f.write(f"avg_denoise_time (per step)={avg_denoise_time}\n")
             f.write(f"avg_vae_time={avg_vae_time}\n")
+            f.write(f"copy_time={self.copy_time}\n")
 
-def run_process(inst):
-    inst.run()
+def run_process(inst, shared_inst):
+    print(f"inst-{inst.inst_id} instance ({inst.device}) runs")
+
+    if inst.device == "mps":
+        shared_inst.set_gpu_state(State.RUNNING)
+
+    inst.run(shared_inst)
+
+    if inst.device == "mps":
+        shared_inst.set_gpu_state(State.IDLE)
+
+    print(f"inst-{inst.inst_id} instance ({inst.device}) terminates")
 
 if __name__ == "__main__":
     # cmd argument
@@ -206,10 +252,20 @@ if __name__ == "__main__":
     parser.add_argument("--num_cpu_instances", type=int, action="store")
     parser.add_argument("--num_gpu_instances", type=int, action="store", default=1)
     parser.add_argument("--model", action="store")
+    parser.add_argument("--offload", action="store_true")
+
     args = parser.parse_args()
 
     mp.set_start_method("spawn")
-    inst = Inference(args)
+
+    # Process manager
+    BaseManager.register("ResourceManager", ResourceManager)
+    manager = BaseManager()
+    manager.start()
+    shared_inst = manager.ResourceManager()
+   
+    # Inference instance
+    inst = Inference(args=args, inst_id=-1)
     inst.load_models()
 
     processes = []
@@ -222,18 +278,26 @@ if __name__ == "__main__":
         f"steps={args.steps} num_instances={num_instances} num_images={num_images}" + 
         f"model={args.model} " + f"num_cpu_isntances={args.num_cpu_instances} num_gpu_instances={args.num_gpu_instances}")
 
-    # generate cpu instances
-    inst.device = "cpu"
-    for rank in range(args.num_cpu_instances):
-        p = mp.Process(target=run_process, args=(inst,))
-        p.start()
-        processes.append(p)
+    # counting inst
+    cur_id = 0
 
     # generate gpu instances
-    inst.device = "mps"
+    assert args.num_gpu_instances == 1, f"num_gpu_instance [{args.num_gpu_instances}]: a single instance is enough"
     for rank in range(args.num_gpu_instances):
-        p = mp.Process(target=run_process, args=(inst,))
+        inst.device = "mps"
+        inst.inst_id = cur_id
+        p = mp.Process(target=run_process, args=(inst, shared_inst,))
         p.start()
+        cur_id += 1
+        processes.append(p)
+
+    # generate cpu instances
+    for rank in range(args.num_cpu_instances):
+        inst.device = "cpu"
+        inst.inst_id = cur_id
+        p = mp.Process(target=run_process, args=(inst, shared_inst, ))
+        p.start()
+        cur_id += 1
         processes.append(p)
 
     # wait 

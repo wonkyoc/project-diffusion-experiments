@@ -11,11 +11,12 @@ EXP_DIR=$HOME/project-diffusion-experiments
 # hyperparameters
 THREADS=(4)
 BATCHS=(1)
-STEPS=10
+STEPS=25
 ITER=1
 PROMPT="an oil surrealist painting of a dreamworld on a seashore where clocks and watches appear to be inexplicably limp and melting in the desolate landscape. a table on the left, with a golden watch swarmed by ants. a strange fleshy creature in the center of the painting"
 
 MODELS=("nota-ai/bk-sdm-base" "nota-ai/bk-sdm-small" "nota-ai/bk-sdm-tiny" "runwayml/stable-diffusion-v1-5")
+MODELS=("nota-ai/bk-sdm-base")
 
 run_diffusers() {
     t=$(date "+%Y%m%d.%H%M%S")
@@ -32,8 +33,7 @@ run_diffusers() {
         --gpu_batch_size "$4" \
         --num_cpu_instances "$3" \
         --model "$5" \
-        --log_dir $t
-
+        --log_dir "$t" 
 }
 
 run_sdcpp() {
@@ -79,7 +79,7 @@ for m in "${MODELS[@]}"; do
     echo "$m"
     #run_diffusers $tr $bs 4 0 "$m"
     #run_diffusers $tr $bs 3 1 "$m"
-    run_diffusers $tr $bs 2 2 "$m"
+    run_diffusers $tr $bs 1 1 "$m"
 done
 #>> $HOSTNAME-diffusers-instance-$i.stdout  2>&1 &
 echo "All done"
