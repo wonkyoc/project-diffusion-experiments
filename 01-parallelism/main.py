@@ -1,6 +1,7 @@
 #!/home/wonkyoc/miniconda3/bin/python
 import gc
 import torch
+import json
 from torch.profiler import profile, record_function, ProfilerActivity
 from PIL import Image
 from transformers import CLIPTextModel, CLIPTokenizer
@@ -16,6 +17,7 @@ import os
 import argparse
 
 from multiprocessing.managers import BaseManager
+from multiprocessing import Lock
 from enum import Enum
 
 
@@ -25,8 +27,10 @@ class State(Enum):
 
 class ResourceManager():
     def __init__(self):
-        self.cpu_state = State.IDLE # XXX: not yet
+        self.cpu_state = State.IDLE # XXX: tbd
         self.gpu_state = State.IDLE
+        self.events = []
+        self.lock = Lock()
     
     def set_gpu_state(self, state):
         self.gpu_state = state
@@ -34,10 +38,33 @@ class ResourceManager():
     def get_gpu_state(self):
         return self.gpu_state
 
+    # https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview#heading=h.yr4qxyxotyw
+    def add_event(self, name: str, cat, ph: str, ts: int, pid: int, args):
+        self.events.append({
+            "name": name,
+            "cat": cat,
+            "ph": ph,
+            "ts": ts * 1000000, # tracing supports microsec
+            "pid": pid,
+            "tid": pid,
+            "args": args
+        })
+
+    def get_events(self):
+        return self.events
+
+    def acquire_lock(self):
+        return self.lock.acquire(block=False)
+
+    def release_lock(self):
+        return self.lock.release()
+
+
 
 class Inference():
     def __init__(self, args, inst_id):
         self.id = inst_id
+        self.pid = os.getpid()
         self.debug = True
 
         # Hyperparameters
@@ -70,6 +97,8 @@ class Inference():
         # torch setting
         torch.set_num_threads(self.threads)
 
+    # Chrome tracing format
+
 
     def load_models(self):
         # Model
@@ -95,6 +124,7 @@ class Inference():
 
     def run(self, ctx):
         gc.collect()
+        ctx.add_event("run", f"instance-{self.id}", "B", time.time(), self.pid, {})
 
         if self.device == "mps":
             self.batch_size = self.args.gpu_batch_size
@@ -139,18 +169,21 @@ class Inference():
         # denoise
         _total_denoise_time = 0
         for t in tqdm(self.scheduler.timesteps):
-            if ctx.get_gpu_state() == State.IDLE and self.args.offload == True:
-                print(f"cpu-{self.inst_id} -> gpu-{self.inst_id}")
+            if self.args.offload == True:
+                if ctx.get_gpu_state() == State.IDLE and ctx.acquire_lock() == True:
+                    ctx.add_event("switch", f"instance-{self.id}", "B", time.time(), self.pid, {})
+                    print(f"cpu-{self.id} -> gpu-{self.id}")
 
-                # move data/model to device
-                start = time.time()
-                self._copy_data("mps")
-                latents = latents.to("mps")
-                text_embeddings = text_embeddings.to("mps")
-                self.copy_time = time.time() - start
+                    # move data/model to device
+                    start = time.time()
+                    self._copy_data("mps")
+                    latents = latents.to("mps")
+                    text_embeddings = text_embeddings.to("mps")
+                    self.copy_time = time.time() - start
 
-                # change status
-                ctx.set_gpu_state(State.RUNNING)
+                    # change status
+                    ctx.set_gpu_state(State.RUNNING)
+                    ctx.add_event("switch", f"instance-{self.id}", "E", time.time(), self.pid, {})
 
             # expand the latents if we are doing classifier-free guidance to avoid doing two forward passes.
             latent_model_input = torch.cat([latents] * 2)
@@ -182,6 +215,7 @@ class Inference():
 
         self.save_image(decoded_images)
         self.save_log()
+        ctx.add_event("run", f"instance-{self.id}", "E", time.time(), self.pid, {})
 
         ## end ##
 
@@ -226,17 +260,19 @@ class Inference():
             f.write(f"copy_time={self.copy_time}\n")
 
 def run_process(inst, shared_inst):
-    print(f"inst-{inst.inst_id} instance ({inst.device}) runs")
+    print(f"inst-{inst.id} instance ({inst.device}) runs")
 
-    if inst.device == "mps":
+    if inst.device == "mps" and shared_inst.acquire_lock():
         shared_inst.set_gpu_state(State.RUNNING)
 
+    inst.pid = os.getpid()
     inst.run(shared_inst)
 
     if inst.device == "mps":
         shared_inst.set_gpu_state(State.IDLE)
+        shared_inst.release_lock()
 
-    print(f"inst-{inst.inst_id} instance ({inst.device}) terminates")
+    print(f"inst-{inst.id} instance ({inst.device}) terminates")
 
 if __name__ == "__main__":
     # cmd argument
@@ -275,17 +311,20 @@ if __name__ == "__main__":
     # audit config
     with open(f"{args.log_dir}/config", "w") as f:
         f.write(f"bs={args.batch_size} gbs={args.gpu_batch_size} threads={args.threads} " +
-        f"steps={args.steps} num_instances={num_instances} num_images={num_images}" + 
-        f"model={args.model} " + f"num_cpu_isntances={args.num_cpu_instances} num_gpu_instances={args.num_gpu_instances}")
+        f"steps={args.steps} num_instances={num_instances} num_images={num_images} " + 
+        f"model={args.model} " + f"num_cpu_isntances={args.num_cpu_instances} num_gpu_instances={args.num_gpu_instances} ")
 
     # counting inst
     cur_id = 0
 
     # generate gpu instances
-    assert args.num_gpu_instances == 1, f"num_gpu_instance [{args.num_gpu_instances}]: a single instance is enough"
+    pid = os.getpid()
+    shared_inst.add_event("main", "manager", "B", time.time(), pid, {})
+    shared_inst.add_event("create_instance", "manager", "B", time.time(), pid, {})
+    assert args.num_gpu_instances <= 1, f"num_gpu_instance [{args.num_gpu_instances}]: a single instance is enough"
     for rank in range(args.num_gpu_instances):
         inst.device = "mps"
-        inst.inst_id = cur_id
+        inst.id = cur_id
         p = mp.Process(target=run_process, args=(inst, shared_inst,))
         p.start()
         cur_id += 1
@@ -294,14 +333,21 @@ if __name__ == "__main__":
     # generate cpu instances
     for rank in range(args.num_cpu_instances):
         inst.device = "cpu"
-        inst.inst_id = cur_id
+        inst.id = cur_id
         p = mp.Process(target=run_process, args=(inst, shared_inst, ))
         p.start()
         cur_id += 1
         processes.append(p)
+    shared_inst.add_event("create_instance", "manager", "E", time.time(), pid, {})
 
-    # wait 
+    # wait
     for p in processes:
         p.join()
+    shared_inst.add_event("main", "manager", "E", time.time(), pid, {})
+
+    # logging
+    with open(f"{args.log_dir}/events.json", "w") as f:
+        json.dump(shared_inst.get_events(), f)
+
 
     #with torch.mps.profiler.profile(mode="interval", wait_until_completed=True):
