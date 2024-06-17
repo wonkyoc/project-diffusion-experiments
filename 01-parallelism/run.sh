@@ -30,9 +30,10 @@ run_diffusers() {
         --steps $STEPS \
         --iteration $ITER \
         --batch_size "$2" \
-        --gpu_batch_size "$4" \
         --num_cpu_instances "$3" \
-        --model "$5" \
+        --num_gpu_instances "$4" \
+        --gpu_batch_size "$5" \
+        --model "$6" \
         --log_dir "$t" 
 }
 
@@ -54,16 +55,6 @@ proc=1   # must <= images
 bs=$((images / proc)) # images per process
 tr=$((cores / proc))  # thr per process
 
-#for d in "${DEVICES[@]}"; do
-#    for b in "${BATCHS[@]}"; do
-#        for t in "${THREADS[@]}"; do
-#            run_diffusers $t $b $d
-#            #run_sdcpp
-#            sleep 5
-#        done
-#    done
-#done
-
 #for i in $(seq 1 $proc);
 #do
 #    run_diffusers $tr $bs "cpu" $proc >> $HOSTNAME-diffusers-instance-$i.stdout  2>&1 &
@@ -74,12 +65,10 @@ tr=$((cores / proc))  # thr per process
 #wait
 
 
-# run_diffusers $tr $bs $num_cpu_instances $gpu_batch_size
 for m in "${MODELS[@]}"; do
     echo "$m"
-    #run_diffusers $tr $bs 4 0 "$m"
-    #run_diffusers $tr $bs 3 1 "$m"
-    run_diffusers $tr $bs 1 1 "$m"
+    # run_diffusers $tr $bs $num_cpu_instances $num_gpu_instances $gpu_batch_size $m
+    run_diffusers $tr $bs 2 1 2 "$m"
 done
 #>> $HOSTNAME-diffusers-instance-$i.stdout  2>&1 &
 echo "All done"

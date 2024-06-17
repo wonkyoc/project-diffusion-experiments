@@ -30,7 +30,7 @@ class ResourceManager():
         self.cpu_state = State.IDLE # XXX: tbd
         self.gpu_state = State.IDLE
         self.events = []
-        self.lock = Lock()
+        self.lock = Lock()  # lock for gpu
     
     def set_gpu_state(self, state):
         self.gpu_state = state
@@ -39,6 +39,7 @@ class ResourceManager():
         return self.gpu_state
 
     # https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview#heading=h.yr4qxyxotyw
+    # tracing
     def add_event(self, name: str, cat, ph: str, ts: int, pid: int, args):
         self.events.append({
             "name": name,
@@ -312,7 +313,7 @@ if __name__ == "__main__":
     with open(f"{args.log_dir}/config", "w") as f:
         f.write(f"bs={args.batch_size} gbs={args.gpu_batch_size} threads={args.threads} " +
         f"steps={args.steps} num_instances={num_instances} num_images={num_images} " + 
-        f"model={args.model} " + f"num_cpu_isntances={args.num_cpu_instances} num_gpu_instances={args.num_gpu_instances} ")
+        f"model={args.model} " + f"num_cpu_isntances={args.num_cpu_instances} num_gpu_instances={args.num_gpu_instances} offload={args.offload}")
 
     # counting inst
     cur_id = 0
