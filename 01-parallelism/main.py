@@ -20,6 +20,8 @@ from multiprocessing.managers import BaseManager
 from multiprocessing import Lock
 from enum import Enum
 
+from torchinfo import summary
+
 
 class State(Enum):
     IDLE = 0
@@ -109,6 +111,46 @@ class Inference():
                 use_safetensors=True)
         self.unet = UNet2DConditionModel.from_pretrained(self.model_id, subfolder="unet",
                 use_safetensors=True)
+        #print("Down blocks")
+        for down in self.unet.down_blocks:
+            down.profile = {}
+        self.unet.mid_block.profile = {}
+        for up in self.unet.up_blocks:
+            up.profile = {}
+        #for i in self.unet.down_blocks:
+        #    param_size = 0
+        #    if hasattr(self.unet.down_blocks[i], "attentions"):
+        #        for param in self.unet.down_blocks[i].attentions.parameters():
+        #            param_size += param.nelement() * param.element_size()
+        #        print(f"down_{i}_attn={param_size}")
+        #    param_size = 0
+        #    if hasattr(self.unet.down_blocks[i], "resnets"):
+        #        for param in self.unet.down_blocks[i].resnets.parameters():
+        #            param_size += param.nelement() * param.element_size()
+        #        print(f"down_{i}_res={param_size}")
+        #    if i == 3:
+        #        print(self.unet.down_blocks[i])
+        #param_size = 0
+        #for param in self.unet.mid_block.attentions.parameters():
+        #    param_size += param.nelement() * param.element_size()
+        #print(f"mid_attn={param_size}")
+        #param_size = 0
+        #for param in self.unet.mid_block.resnets.parameters():
+        #    param_size += param.nelement() * param.element_size()
+        #print(f"mid_res={param_size}")
+        #for i in range(4):
+        #    if i == 0:
+        #        print(self.unet.up_blocks[i])
+        #    param_size = 0
+        #    if hasattr(self.unet.up_blocks[i], "attentions"):
+        #        for param in self.unet.up_blocks[i].attentions.parameters():
+        #            param_size += param.nelement() * param.element_size()
+        #        print(f"up_{i}_attn={param_size}")
+        #    param_size = 0
+        #    if hasattr(self.unet.up_blocks[i], "resnets"):
+        #        for param in self.unet.up_blocks[i].resnets.parameters():
+        #            param_size += param.nelement() * param.element_size()
+        #        print(f"up_{i}_res={param_size}")
         #scheduler = DPMSolverMultistepScheduler.from_pretrained(model_id, subfolder="scheduler")
         self.scheduler = EulerAncestralDiscreteScheduler.from_pretrained(self.model_id, subfolder="scheduler")
 
@@ -217,6 +259,22 @@ class Inference():
         self.save_image(decoded_images)
         self.save_log()
         ctx.add_event("run", f"instance-{self.id}", "E", time.time(), self.pid, {})
+
+        # inside layer profile
+        steps = self.num_inference_steps
+        downs, mid, ups = self.unet.down_blocks, self.unet.mid_block, self.unet.up_blocks
+        for down in downs:
+            for k, v in down.profile.items():
+                down.profile[k] /= steps
+            print(down.profile)
+        for k, v in mid.profile.items():
+            mid.profile[k] /= steps
+        print(mid.profile)
+        for up in ups:
+            for k, v in up.profile.items():
+                up.profile[k] /= steps
+            print(up.profile)
+
 
         ## end ##
 
