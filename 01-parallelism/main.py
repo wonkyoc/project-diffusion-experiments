@@ -21,6 +21,7 @@ from multiprocessing import Lock
 from enum import Enum
 
 from torchinfo import summary
+from accelerate import init_empty_weights, load_checkpoint_and_dispatch
 
 
 class State(Enum):
@@ -109,8 +110,10 @@ class Inference():
         self.tokenizer = CLIPTokenizer.from_pretrained(self.model_id, subfolder="tokenizer")
         self.text_encoder = CLIPTextModel.from_pretrained(self.model_id, subfolder="text_encoder", 
                 use_safetensors=True)
+
         self.unet = UNet2DConditionModel.from_pretrained(self.model_id, subfolder="unet",
-                use_safetensors=True)
+                use_safetensors=True, device_map="auto")
+        print(self.unet.hf_device_map)
         #print("Down blocks")
         for down in self.unet.down_blocks:
             down.profile = {}
@@ -162,14 +165,14 @@ class Inference():
     def _copy_data(self, device):
         self.device = device
         self.text_encoder.to(device)
-        self.unet.to(device)
+        #self.unet.to(device)
         self.vae.to(device)
 
     def run(self, ctx):
         gc.collect()
         ctx.add_event("run", f"instance-{self.id}", "B", time.time(), self.pid, {})
 
-        if self.device == "mps":
+        if self.device == "mps" or "cuda":
             self.batch_size = self.args.gpu_batch_size
             self._copy_data(self.device)
 
@@ -232,11 +235,16 @@ class Inference():
             latent_model_input = torch.cat([latents] * 2)
             latent_model_input = self.scheduler.scale_model_input(latent_model_input, timestep=t)
 
+            unet_device = next(self.unet.parameters()).device
+            print(unet_device)
+            latent_model_input.to(unet_device)
+            text_embeddings.to(unet_device)
+
             # predict the noise residual
             start = time.time()
             with torch.no_grad():
                 noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=text_embeddings).sample
-            _total_denoise_time += time.time() - start
+            #_total_denoise_time += time.time() - start
 
             # perform guidance
             noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
@@ -376,33 +384,36 @@ if __name__ == "__main__":
     # counting inst
     cur_id = 0
 
+    inst.device = "cuda"
+
     # generate gpu instances
     pid = os.getpid()
     shared_inst.add_event("main", "manager", "B", time.time(), pid, {})
     shared_inst.add_event("create_instance", "manager", "B", time.time(), pid, {})
     assert args.num_gpu_instances <= 1, f"num_gpu_instance [{args.num_gpu_instances}]: a single instance is enough"
-    for rank in range(args.num_gpu_instances):
-        inst.device = "mps"
-        inst.id = cur_id
-        p = mp.Process(target=run_process, args=(inst, shared_inst,))
-        p.start()
-        cur_id += 1
-        processes.append(p)
+    #for rank in range(args.num_gpu_instances):
+    #    inst.device = "mps"
+    #    inst.id = cur_id
+    #    p = mp.Process(target=run_process, args=(inst, shared_inst,))
+    #    p.start()
+    #    cur_id += 1
+    #    processes.append(p)
 
-    # generate cpu instances
-    for rank in range(args.num_cpu_instances):
-        inst.device = "cpu"
-        inst.id = cur_id
-        p = mp.Process(target=run_process, args=(inst, shared_inst, ))
-        p.start()
-        cur_id += 1
-        processes.append(p)
-    shared_inst.add_event("create_instance", "manager", "E", time.time(), pid, {})
+    ## generate cpu instances
+    #for rank in range(args.num_cpu_instances):
+    #    inst.device = "cpu"
+    #    inst.id = cur_id
+    #    p = mp.Process(target=run_process, args=(inst, shared_inst, ))
+    #    p.start()
+    #    cur_id += 1
+    #    processes.append(p)
+    #shared_inst.add_event("create_instance", "manager", "E", time.time(), pid, {})
 
-    # wait
-    for p in processes:
-        p.join()
-    shared_inst.add_event("main", "manager", "E", time.time(), pid, {})
+    ## wait
+    #for p in processes:
+    #    p.join()
+    #shared_inst.add_event("main", "manager", "E", time.time(), pid, {})
+    run_process(inst, shared_inst)
 
     # logging
     with open(f"{args.log_dir}/events.json", "w") as f:
