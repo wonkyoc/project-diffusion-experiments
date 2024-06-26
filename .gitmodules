@@ -1,0 +1,4 @@
+[submodule "diffusers"]
+	path = diffusers
+	url = git@github.com:wonkyoc/diffusers.git
+	branch = v0.27.2-exp
