@@ -16,7 +16,7 @@ ITER=1
 PROMPT="an oil surrealist painting of a dreamworld on a seashore where clocks and watches appear to be inexplicably limp and melting in the desolate landscape. a table on the left, with a golden watch swarmed by ants. a strange fleshy creature in the center of the painting"
 
 MODELS=("nota-ai/bk-sdm-base" "nota-ai/bk-sdm-small" "nota-ai/bk-sdm-tiny" "runwayml/stable-diffusion-v1-5")
-MODELS=("nota-ai/bk-sdm-base")
+MODELS=("runwayml/stable-diffusion-v1-5")
 
 run_diffusers() {
     t=$(date "+%Y%m%d.%H%M%S")
@@ -34,7 +34,8 @@ run_diffusers() {
         --num_gpu_instances "$4" \
         --gpu_batch_size "$5" \
         --model "$6" \
-        --log_dir "$t" 
+        --log_dir "$t" \
+        --custom_map
 }
 
 run_sdcpp() {
@@ -68,7 +69,7 @@ tr=$((cores / proc))  # thr per process
 for m in "${MODELS[@]}"; do
     echo "$m"
     # run_diffusers $tr $bs $num_cpu_instances $num_gpu_instances $gpu_batch_size $m
-    run_diffusers $tr $bs 2 1 2 "$m"
+    run_diffusers $tr $bs 1 0 0 "$m"
 done
 #>> $HOSTNAME-diffusers-instance-$i.stdout  2>&1 &
 echo "All done"

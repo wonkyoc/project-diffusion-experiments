@@ -21,8 +21,8 @@ from multiprocessing import Lock
 from enum import Enum
 
 from torchinfo import summary
-from accelerate import init_empty_weights, load_checkpoint_and_dispatch
-
+from accelerate import init_empty_weights, load_checkpoint_and_dispatch, infer_auto_device_map
+from torch.profiler import profile, record_function, ProfilerActivity
 
 class State(Enum):
     IDLE = 0
@@ -111,9 +111,30 @@ class Inference():
         self.text_encoder = CLIPTextModel.from_pretrained(self.model_id, subfolder="text_encoder", 
                 use_safetensors=True)
 
+        device_map = {
+                "conv_in": "cpu",
+                "time_embedding": "cpu",
+                "down_blocks.0": "mps",
+                "down_blocks.1": "cpu",
+                "down_blocks.2": "cpu",
+                "down_blocks.3": "cpu",
+                "up_blocks.0": "cpu",
+                "up_blocks.1": "cpu",
+                "up_blocks.2": "cpu",
+                "up_blocks.3": "mps",
+                "mid_block": "cpu",
+                "conv_norm_out": "cpu",
+                "conv_out": "cpu",
+        }
+
         self.unet = UNet2DConditionModel.from_pretrained(self.model_id, subfolder="unet",
-                use_safetensors=True, device_map="auto")
+                use_safetensors=True, device_map=device_map)
         print(self.unet.hf_device_map)
+        #self.unet = UNet2DConditionModel.from_pretrained(self.model_id, subfolder="unet",
+        #        use_safetensors=True)
+        #for name, param in self.unet.named_parameters():
+        #    print(name)
+        #1/0
         #print("Down blocks")
         for down in self.unet.down_blocks:
             down.profile = {}
@@ -157,22 +178,22 @@ class Inference():
         #scheduler = DPMSolverMultistepScheduler.from_pretrained(model_id, subfolder="scheduler")
         self.scheduler = EulerAncestralDiscreteScheduler.from_pretrained(self.model_id, subfolder="scheduler")
 
-        if self.device == "cpu":
-            self.unet.share_memory()
-            self.vae.share_memory()
-            self.text_encoder.share_memory()
+        #if self.device == "cpu":
+        #    self.unet.share_memory()
+        #    self.vae.share_memory()
+        #    self.text_encoder.share_memory()
 
     def _copy_data(self, device):
         self.device = device
         self.text_encoder.to(device)
-        #self.unet.to(device)
+        self.unet.to(device)
         self.vae.to(device)
 
     def run(self, ctx):
         gc.collect()
         ctx.add_event("run", f"instance-{self.id}", "B", time.time(), self.pid, {})
 
-        if self.device == "mps" or "cuda":
+        if self.device == "mps" or self.device == "cuda":
             self.batch_size = self.args.gpu_batch_size
             self._copy_data(self.device)
 
@@ -211,9 +232,11 @@ class Inference():
 
         # set time step
         self.scheduler.set_timesteps(self.num_inference_steps)
+        #self.scheduler.timesteps.to(self.device)
 
         # denoise
         _total_denoise_time = 0
+        count = 0
         for t in tqdm(self.scheduler.timesteps):
             if self.args.offload == True:
                 if ctx.get_gpu_state() == State.IDLE and ctx.acquire_lock() == True:
@@ -235,15 +258,23 @@ class Inference():
             latent_model_input = torch.cat([latents] * 2)
             latent_model_input = self.scheduler.scale_model_input(latent_model_input, timestep=t)
 
-            unet_device = next(self.unet.parameters()).device
-            print(unet_device)
-            latent_model_input.to(unet_device)
-            text_embeddings.to(unet_device)
-
             # predict the noise residual
             start = time.time()
-            with torch.no_grad():
-                noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=text_embeddings).sample
+
+            if count == 23:
+                with profile(activities=[ProfilerActivity.CPU],
+                        on_trace_ready=torch.profiler.tensorboard_trace_handler('./log'),
+                        record_shapes=True,
+                        profile_memory=True,
+                        with_stack=True
+                ) as prof:
+                    with record_function("unet"):
+                        with torch.no_grad():
+                            noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=text_embeddings).sample
+            else:
+                with torch.no_grad():
+                    noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=text_embeddings).sample
+            count += 1
             #_total_denoise_time += time.time() - start
 
             # perform guidance
@@ -282,7 +313,6 @@ class Inference():
             for k, v in up.profile.items():
                 up.profile[k] /= steps
             print(up.profile)
-
 
         ## end ##
 
@@ -331,6 +361,8 @@ def run_process(inst, shared_inst):
 
     if inst.device == "mps" and shared_inst.acquire_lock():
         shared_inst.set_gpu_state(State.RUNNING)
+    
+    inst.load_models()
 
     inst.pid = os.getpid()
     inst.run(shared_inst)
@@ -356,6 +388,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_gpu_instances", type=int, action="store", default=1)
     parser.add_argument("--model", action="store")
     parser.add_argument("--offload", action="store_true")
+    parser.add_argument("--custom_map", action="store_true")
 
     args = parser.parse_args()
 
@@ -369,7 +402,7 @@ if __name__ == "__main__":
    
     # Inference instance
     inst = Inference(args=args, inst_id=-1)
-    inst.load_models()
+    #inst.load_models()
 
     processes = []
     inst.num_instances = num_instances = args.num_cpu_instances + args.num_gpu_instances
@@ -384,36 +417,34 @@ if __name__ == "__main__":
     # counting inst
     cur_id = 0
 
-    inst.device = "cuda"
-
     # generate gpu instances
     pid = os.getpid()
     shared_inst.add_event("main", "manager", "B", time.time(), pid, {})
     shared_inst.add_event("create_instance", "manager", "B", time.time(), pid, {})
     assert args.num_gpu_instances <= 1, f"num_gpu_instance [{args.num_gpu_instances}]: a single instance is enough"
-    #for rank in range(args.num_gpu_instances):
-    #    inst.device = "mps"
-    #    inst.id = cur_id
-    #    p = mp.Process(target=run_process, args=(inst, shared_inst,))
-    #    p.start()
-    #    cur_id += 1
-    #    processes.append(p)
+    for rank in range(args.num_gpu_instances):
+        inst.device = "mps"
+        inst.id = cur_id
+        p = mp.Process(target=run_process, args=(inst, shared_inst,))
+        p.start()
+        cur_id += 1
+        processes.append(p)
 
-    ## generate cpu instances
-    #for rank in range(args.num_cpu_instances):
-    #    inst.device = "cpu"
-    #    inst.id = cur_id
-    #    p = mp.Process(target=run_process, args=(inst, shared_inst, ))
-    #    p.start()
-    #    cur_id += 1
-    #    processes.append(p)
-    #shared_inst.add_event("create_instance", "manager", "E", time.time(), pid, {})
+    # generate cpu instances
+    for rank in range(args.num_cpu_instances):
+        inst.device = "cpu"
+        inst.id = cur_id
+        p = mp.Process(target=run_process, args=(inst, shared_inst, ))
+        p.start()
+        cur_id += 1
+        processes.append(p)
+    shared_inst.add_event("create_instance", "manager", "E", time.time(), pid, {})
 
-    ## wait
-    #for p in processes:
-    #    p.join()
-    #shared_inst.add_event("main", "manager", "E", time.time(), pid, {})
-    run_process(inst, shared_inst)
+    # wait
+    for p in processes:
+        p.join()
+    shared_inst.add_event("main", "manager", "E", time.time(), pid, {})
+    #run_process(inst, shared_inst)
 
     # logging
     with open(f"{args.log_dir}/events.json", "w") as f:
