@@ -2,3 +2,7 @@
 	path = diffusers
 	url = git@github.com:wonkyoc/diffusers.git
 	branch = v0.27.2-exp
+[submodule "accelerate"]
+	path = accelerate
+    url = git@github.com:wonkyoc/accelerate.git
+    branch = v0.31.0-exp
